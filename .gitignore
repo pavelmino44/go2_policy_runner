@@ -1,0 +1,5 @@
+go2_policy_runner/thirdparty/
+build/
+install/
+log/
+__pycache__/

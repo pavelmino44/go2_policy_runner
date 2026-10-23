@@ -1,0 +1,111 @@
+# Copyright (c) 2026, unitree-go2-rl contributors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Default gains, the folded "lie" pose and the remote-controller combinations are taken from
+# unitree_rl_lab deploy/robots/go2/config/config.yaml (Copyright (c) 2025, Unitree Robotics Co., Ltd.,
+# Apache-2.0). The "stand" pose is the default joint position of the unitree_rl_lab Go2 asset.
+# Joint limits are taken from unitree_mujoco unitree_robots/go2/go2.xml
+# (Copyright (c) 2016-2024 HangZhou YuShu TECHNOLOGY CO.,LTD. ("Unitree Robotics"), BSD-3-Clause).
+#
+# go2_policy_runner configuration for Unitree Go2.
+# The SAME file is used in unitree_mujoco and on the real robot.
+#
+# Motor order everywhere in this file is the SDK order:
+#   0 FR_hip  1 FR_thigh  2 FR_calf   3 FL_hip  4 FL_thigh  5 FL_calf
+#   6 RR_hip  7 RR_thigh  8 RR_calf   9 RL_hip 10 RL_thigh 11 RL_calf
+#
+# Remote-controller expressions (unitree_rl_lab deploy syntax):
+#   "LT + A.on_pressed", "start.on_pressed", "LT(2s) + down", "X | Y", "!A" ...
+#   keys: LT RT LB RB A B X Y up down left right start back F1 F2 lx ly rx ry
+# An empty expression "" means: transition allowed only via the ~/set_mode service.
+
+policy_controller:
+  ros__parameters:
+    num_motors: 12
+    control_rate: 500.0          # [Hz] lowcmd publish rate; step_dt * control_rate must be an integer
+    lowstate_timeout: 0.1        # [s] no lowstate for this long -> fallback (passive)
+    cmd_vel_timeout: 0.5         # [s] no cmd_vel for this long -> zero velocity command
+    state_rate: 10.0             # [Hz] ~/state publish rate
+    publish_policy_step: true    # publish ~/policy_step (obs / actions) for logging
+    onnx_threads: 1
+
+    # Built-in sport mode handling (robot RPC over /api/motion_switcher/*):
+    #   auto    - release it if the service exists (robot), skip if not (simulation)
+    #   release - the service must exist (fail otherwise)
+    #   skip    - never touch it
+    motion_switcher:
+      mode: auto
+      discovery_timeout: 3.0
+      call_timeout: 5.0
+
+    # Listen to lowcmd before taking over; abort if someone else publishes it (0 = disable).
+    lowcmd_check_duration: 0.5
+
+    # Relative policy_dir values are resolved against policy_root
+    # (default: <share>/go2_policy_runner/policies). Also accepted: absolute paths and
+    # package://<pkg>/<path>. A directory without exported/ selects its latest run sub-folder,
+    # e.g. unitree_rl_lab/logs/rsl_rl/unitree_go2_velocity.
+    policy_root: ""
+    default_policy_dir: ""       # set by the launch argument policy_dir:=...
+
+    # Hard limits for position targets of every mode (SDK order), from go2_description / go2.xml.
+    # Remove the block to disable.
+    joint_limits:
+      lower: [-1.0472, -1.5708, -2.7227,  -1.0472, -1.5708, -2.7227,  -1.0472, -0.5236, -2.7227,  -1.0472, -0.5236, -2.7227]
+      upper: [ 1.0472,  3.4907, -0.83776,  1.0472,  3.4907, -0.83776,  1.0472,  4.5379, -0.83776,  1.0472,  4.5379, -0.83776]
+
+    poses:
+      lie:   [0.0, 1.36, -2.65,  0.0, 1.36, -2.65,  0.0, 1.36, -2.65,  0.0, 1.36, -2.65]
+      # = default_joint_pos of the unitree_rl_lab Go2 velocity task
+      stand: [-0.1, 0.8, -1.5,   0.1, 0.8, -1.5,   -0.1, 1.0, -1.5,   0.1, 1.0, -1.5]
+
+    fsm:
+      modes: [passive, stand, sit, walk]
+      initial: passive
+      fallback: passive            # must be of type passive; reachable from every mode
+
+      passive:
+        type: passive
+        kd: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+        transitions:
+          stand: "LT + A.on_pressed"
+
+      stand:
+        type: fix_stand
+        kp: [60.0, 80.0, 80.0, 60.0, 80.0, 80.0, 60.0, 80.0, 80.0, 60.0, 80.0, 80.0]
+        kd: [5.0, 4.0, 4.0, 5.0, 4.0, 4.0, 5.0, 4.0, 4.0, 5.0, 4.0, 4.0]
+        sequence: [lie, stand]     # fold the legs first, then stand up
+        durations: [1.0, 1.5]      # [s] to reach each pose
+        interpolation: smooth      # smooth | linear
+        transitions:
+          passive: "LT + B.on_pressed"
+          walk: "start.on_pressed"
+          sit: "LT + down.on_pressed"
+
+      sit:
+        type: fix_stand
+        kp: [60.0, 80.0, 80.0, 60.0, 80.0, 80.0, 60.0, 80.0, 80.0, 60.0, 80.0, 80.0]
+        kd: [5.0, 4.0, 4.0, 5.0, 4.0, 4.0, 5.0, 4.0, 4.0, 5.0, 4.0, 4.0]
+        sequence: [lie]
+        durations: [2.0]
+        transitions:
+          passive: "LT + B.on_pressed"
+          stand: "LT + A.on_pressed"
+
+      walk:
+        type: rl_policy
+        policy_dir: ""             # "" -> default_policy_dir
+        max_tilt: 1.0              # [rad] fall detection -> passive (<= 0 disables)
+        transitions:
+          passive: "LT + B.on_pressed"
+          stand: "LT + A.on_pressed"
+          sit: "LT + down.on_pressed"
+
+remote_teleop:
+  ros__parameters:
+    rate: 50.0
+    max_vx: 1.0          # [m/s]   left stick up
+    max_vy: 0.5          # [m/s]   left stick left
+    max_wz: 1.0          # [rad/s] right stick left
+    deadzone: 0.05
+    publish_when_idle: false   # publish zeros even when no remote frame is present

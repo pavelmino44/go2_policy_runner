@@ -1,0 +1,7 @@
+# Request a controller mode change.
+# Allowed if `mode` is a transition target of the active mode, or the fallback (passive) mode.
+
+string mode
+---
+bool success
+string message

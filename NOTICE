@@ -1,0 +1,21 @@
+go2_policy_runner
+Copyright (c) 2026, unitree-go2-rl contributors.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software derived from unitree_rl_lab
+(https://github.com/unitreerobotics/unitree_rl_lab), licensed under the Apache License,
+Version 2.0. Copyright (c) 2025, Unitree Robotics Co., Ltd.
+
+This product includes software derived from unitree_sdk2
+(https://github.com/unitreerobotics/unitree_sdk2) and unitree_ros2
+(https://github.com/unitreerobotics/unitree_ros2), licensed under the BSD 3-Clause License.
+Copyright (c) 2016-2024 HangZhou YuShu TECHNOLOGY CO.,LTD. ("Unitree Robotics").
+
+Joint limit values in config/go2.yaml are taken from unitree_mujoco
+(https://github.com/unitreerobotics/unitree_mujoco), BSD 3-Clause License.
+
+See THIRD_PARTY_NOTICES.md for the list of derived files and the full license texts.
+
+Unitree, Go2 and related names are trademarks of Unitree Robotics. This project is not
+affiliated with, endorsed by, or sponsored by Unitree Robotics.
