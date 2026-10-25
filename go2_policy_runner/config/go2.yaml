@@ -109,3 +109,18 @@ remote_teleop:
     max_wz: 1.0          # [rad/s] right stick left
     deadzone: 0.05
     publish_when_idle: false   # publish zeros even when no remote frame is present
+
+# Terminal monitor: ros2 run go2_policy_runner robot_monitor --ros-args --params-file <this file>
+robot_monitor:
+  ros__parameters:
+    controller: policy_controller   # name of the controller node
+    refresh_rate: 10.0              # [Hz] screen refresh
+    nominal_lowstate_rate: 0.0      # [Hz] 0 = use the controller's control_rate
+    publish_diagnostics: true       # publish /diagnostics (rqt_robot_monitor)
+    thresholds:
+      motor_temp: 65.0              # [degC]
+      joint_limit_margin: 0.05      # fraction of the joint range
+      battery: 20.0                 # [%]
+      lowstate_rate_ratio: 0.8      # of the nominal lowstate rate
+      tilt_ratio: 0.7               # of max_tilt of the active mode
+      inference_ratio: 0.5          # of the policy period

@@ -40,7 +40,7 @@ the DDS network interface changes between the two.
 | Package | Contents |
 |---|---|
 | `go2_policy_runner_interfaces` | `ControllerState.msg`, `PolicyStep.msg`, `SetMode.srv` |
-| `go2_policy_runner` | Core library (policy environment, ONNX Runtime, FSM, remote decoder), `policy_controller` and `remote_teleop` nodes, launch file, Go2 config |
+| `go2_policy_runner` | Core library (policy environment, ONNX Runtime, FSM, remote decoder), `policy_controller`, `remote_teleop` and `robot_monitor` nodes, launch file, Go2 config |
 
 ## Architecture
 
@@ -54,7 +54,7 @@ flowchart LR
 
     robot -- "/lowstate" --> ctrl
     ctrl -- "/lowcmd<br/>(with CRC)" --> robot
-    robot -- "/lowstate (wireless_remote)" --> teleop
+    robot -- "/lowstate<br/>(wireless_remote)" --> teleop
     teleop -- "/cmd_vel" --> ctrl
     user -. "/cmd_vel" .-> ctrl
     user -. "~/set_mode" .-> ctrl
@@ -77,6 +77,18 @@ flowchart LR
 Converts the Unitree remote sticks into `/cmd_vel`. Left stick: forward and sideways. Right
 stick: yaw. In `unitree_mujoco`, a gamepad emulates the remote when `use_joystick: 1` is set.
 Disable this node (`teleop:=false`) if something else publishes `/cmd_vel`.
+
+### `robot_monitor`
+
+Terminal UI (ncurses) showing the controller and robot state: FSM mode and allowed
+transitions, loop rates, `cmd_vel` and its publishers, base orientation and IMU, a per-joint
+table (position within limits, velocity, torque, target, gains, temperature), policy inference
+time and action range, battery and foot forces, and a list of active alerts.
+
+The monitor is read-only. Its only action is `space`, which requests `passive` through
+`~/set_mode`. `q` quits. It also publishes one `diagnostic_msgs/DiagnosticStatus` per category
+on `/diagnostics` (`publish_diagnostics: false` turns this off). Alert thresholds are in the
+`robot_monitor` section of `config/go2.yaml`. The terminal must be at least 80×40.
 
 ### Startup sequence
 
@@ -126,15 +138,15 @@ Invalid expressions are rejected at startup.
 - `unitree_go` and `unitree_api` message packages from
   [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2) (`cyclonedds_ws/src/unitree`)
 - ONNX Runtime C/C++ (CPU). The x86_64 and aarch64 (Jetson) builds are both supported.
-- Eigen 3, yaml-cpp
+- Eigen 3, yaml-cpp, ncurses (for `robot_monitor`)
 
 ## Build
 
 ```bash
-sudo apt install ros-humble-rmw-cyclonedds-cpp libyaml-cpp-dev libeigen3-dev
+sudo apt install ros-humble-rmw-cyclonedds-cpp libyaml-cpp-dev libeigen3-dev libncurses-dev
 
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone https://github.com/pavelmino44/go2_policy_runner.git
+git clone https://github.com/<user>/go2_policy_runner.git
 git clone https://github.com/unitreerobotics/unitree_ros2.git
 touch unitree_ros2/example/COLCON_IGNORE    # only the message packages are needed
 
@@ -216,6 +228,8 @@ ros2 launch go2_policy_runner policy_runner.launch.py network_interface:=enp3s0 
 # Other terminals need the same DDS settings
 source install/go2_policy_runner/share/go2_policy_runner/scripts/dds_env.sh lo   # or enp3s0
 
+ros2 run go2_policy_runner robot_monitor --ros-args \
+    --params-file install/go2_policy_runner/share/go2_policy_runner/config/go2.yaml
 ros2 topic echo /policy_controller/state
 ros2 service call /policy_controller/set_mode go2_policy_runner_interfaces/srv/SetMode "{mode: stand}"
 ros2 service call /policy_controller/set_mode go2_policy_runner_interfaces/srv/SetMode "{mode: walk}"

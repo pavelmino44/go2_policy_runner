@@ -17,11 +17,13 @@
   <depend>rclcpp_components</depend>
   <depend>ament_index_cpp</depend>
   <depend>geometry_msgs</depend>
+  <depend>diagnostic_msgs</depend>
   <depend>unitree_go</depend>
   <depend>unitree_api</depend>
   <depend>go2_policy_runner_interfaces</depend>
   <depend>eigen</depend>
   <depend>yaml-cpp</depend>
+  <depend>libncurses-dev</depend>
 
   <exec_depend>rmw_cyclonedds_cpp</exec_depend>
   <exec_depend>launch</exec_depend>

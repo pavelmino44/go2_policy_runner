@@ -109,6 +109,7 @@ private:
   std::thread startup_thread_;
   std::atomic<bool> ready_{false};
   std::atomic<bool> stopping_{false};
+  std::atomic<double> mode_enter_time_{0.0};  // now_s() of the last FSM transition
   std::string startup_status_{"waiting for lowstate"};
 
   mutable std::mutex state_mutex_;  // guards the block below

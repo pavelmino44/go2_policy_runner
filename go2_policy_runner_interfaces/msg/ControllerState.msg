@@ -4,6 +4,7 @@ std_msgs/Header header
 
 string mode                     # active mode
 string mode_type                # passive | fix_stand | rl_policy
+float32 mode_time               # [s] time spent in the active mode
 string[] modes                  # all configured modes
 string[] allowed_transitions    # modes reachable from the active one (fallback is always reachable)
 string last_transition_reason

@@ -18,6 +18,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(unitree_go REQUIRED)
 find_package(unitree_api REQUIRED)
 find_package(go2_policy_runner_interfaces REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
+find_package(Curses REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
 include(cmake/onnxruntime.cmake)
@@ -41,6 +43,7 @@ add_library(${PROJECT_NAME}_core SHARED
   src/policy/onnx_policy.cpp
   src/fsm/modes.cpp
   src/fsm/mode_manager.cpp
+  src/monitor/monitor_model.cpp
 )
 target_include_directories(${PROJECT_NAME}_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -73,6 +76,13 @@ rclcpp_components_register_node(${PROJECT_NAME}_ros
 add_executable(policy_controller src/nodes/policy_controller_main.cpp)
 target_link_libraries(policy_controller ${PROJECT_NAME}_ros)
 
+# Terminal UI showing the controller and robot state (ncurses)
+add_executable(robot_monitor src/monitor/monitor_main.cpp src/monitor/monitor_node.cpp)
+target_include_directories(robot_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
+target_link_libraries(robot_monitor ${PROJECT_NAME}_core ${CURSES_LIBRARIES})
+ament_target_dependencies(robot_monitor
+  rclcpp geometry_msgs diagnostic_msgs unitree_go go2_policy_runner_interfaces)
+
 # ---------------------------------------------------------------------------------------------
 # install
 # ---------------------------------------------------------------------------------------------
@@ -80,7 +90,7 @@ install(TARGETS ${PROJECT_NAME}_core ${PROJECT_NAME}_ros
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS policy_controller DESTINATION lib/${PROJECT_NAME})
+install(TARGETS policy_controller robot_monitor DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include/${PROJECT_NAME})
 install(DIRECTORY config launch policies DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS scripts/dds_env.sh scripts/fetch_onnxruntime.sh DESTINATION share/${PROJECT_NAME}/scripts)
@@ -104,6 +114,8 @@ if(BUILD_TESTING)
   ament_add_gtest(test_fsm test/test_fsm.cpp
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
   target_link_libraries(test_fsm ${PROJECT_NAME}_core)
+  ament_add_gtest(test_monitor test/test_monitor.cpp)
+  target_link_libraries(test_monitor ${PROJECT_NAME}_core)
 endif()
 
 ament_package()

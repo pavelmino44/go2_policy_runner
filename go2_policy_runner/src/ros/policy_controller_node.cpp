@@ -44,6 +44,7 @@ PolicyControllerNode::PolicyControllerNode(const rclcpp::NodeOptions & options)
   fsm_ = build_fsm();
   fsm_->on_transition = [this](const std::string & from, const std::string & to,
       const std::string & reason) {
+      mode_enter_time_ = now_s();
       if (from.empty()) {
         RCLCPP_INFO(get_logger(), "FSM: start in '%s' (%s)", to.c_str(), reason.c_str());
       } else {
@@ -518,6 +519,7 @@ void PolicyControllerNode::publish_state()
   msg.header.stamp = now();
   msg.mode = fsm_->current_mode();
   if (auto * m = fsm_->find(msg.mode)) {msg.mode_type = m->type();}
+  msg.mode_time = msg.mode.empty() ? 0.0f : static_cast<float>(now_s() - mode_enter_time_.load());
   msg.modes = fsm_->mode_names();
   msg.allowed_transitions = fsm_->allowed_targets();
   msg.last_transition_reason = fsm_->last_transition_reason();
