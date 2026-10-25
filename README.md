@@ -53,7 +53,7 @@ flowchart LR
     out["~/state<br/>~/policy_step"]
 
     robot -- "/lowstate" --> ctrl
-    ctrl -- "/lowcmd (with CRC)" --> robot
+    ctrl -- "/lowcmd<br/>(with CRC)" --> robot
     robot -- "/lowstate (wireless_remote)" --> teleop
     teleop -- "/cmd_vel" --> ctrl
     user -. "/cmd_vel" .-> ctrl
@@ -134,7 +134,7 @@ Invalid expressions are rejected at startup.
 sudo apt install ros-humble-rmw-cyclonedds-cpp libyaml-cpp-dev libeigen3-dev
 
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone https://github.com/<user>/go2_policy_runner.git
+git clone https://github.com/pavelmino44/go2_policy_runner.git
 git clone https://github.com/unitreerobotics/unitree_ros2.git
 touch unitree_ros2/example/COLCON_IGNORE    # only the message packages are needed
 
