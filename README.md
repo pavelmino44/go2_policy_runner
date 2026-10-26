@@ -62,7 +62,7 @@ flowchart LR
     teleop -- "/cmd_vel" --> ctrl
     inputs -. "/remote<br/>/cmd_vel" .-> ctrl
     user -. "/cmd_vel" .-> ctrl
-    user -. "~/set_mode" .-> ctrl
+    user -. "~/set_<br/>_mode" .-> ctrl
     ctrl --> out
 ```
 
