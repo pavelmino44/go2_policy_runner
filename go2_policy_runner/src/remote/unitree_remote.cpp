@@ -8,6 +8,7 @@
 // Changes by unitree-go2-rl contributors (2026):
 //   - time is injected (no hidden steady_clock calls)
 //   - frame encode/decode without type punning, raw stick values, key aliases
+//   - button bitfield accessors (for unitree_go/WirelessController)
 
 #include "go2_policy_runner/remote/unitree_remote.hpp"
 
@@ -58,24 +59,8 @@ void write_float(std::array<std::uint8_t, 40> & raw, std::size_t offset, float v
 }
 }  // namespace
 
-RemoteFrame RemoteFrame::decode(const std::array<std::uint8_t, 40> & raw)
+std::uint16_t RemoteFrame::buttons() const
 {
-  RemoteFrame f;
-  const std::uint16_t b = static_cast<std::uint16_t>(raw[kBtnOffset] | (raw[kBtnOffset + 1] << 8));
-  f.R1 = b & kR1; f.L1 = b & kL1; f.start = b & kStart; f.select = b & kSelect;
-  f.R2 = b & kR2; f.L2 = b & kL2; f.F1 = b & kF1; f.F2 = b & kF2;
-  f.A = b & kA; f.B = b & kB; f.X = b & kX; f.Y = b & kY;
-  f.up = b & kUp; f.right = b & kRight; f.down = b & kDown; f.left = b & kLeft;
-  f.lx = read_float(raw, kLxOffset);
-  f.rx = read_float(raw, kRxOffset);
-  f.ry = read_float(raw, kRyOffset);
-  f.ly = read_float(raw, kLyOffset);
-  return f;
-}
-
-std::array<std::uint8_t, 40> RemoteFrame::encode() const
-{
-  std::array<std::uint8_t, 40> raw{};
   std::uint16_t b = 0;
   if (R1) b |= kR1;
   if (L1) b |= kL1;
@@ -93,6 +78,32 @@ std::array<std::uint8_t, 40> RemoteFrame::encode() const
   if (right) b |= kRight;
   if (down) b |= kDown;
   if (left) b |= kLeft;
+  return b;
+}
+
+void RemoteFrame::set_buttons(std::uint16_t b)
+{
+  R1 = b & kR1; L1 = b & kL1; start = b & kStart; select = b & kSelect;
+  R2 = b & kR2; L2 = b & kL2; F1 = b & kF1; F2 = b & kF2;
+  A = b & kA; B = b & kB; X = b & kX; Y = b & kY;
+  up = b & kUp; right = b & kRight; down = b & kDown; left = b & kLeft;
+}
+
+RemoteFrame RemoteFrame::decode(const std::array<std::uint8_t, 40> & raw)
+{
+  RemoteFrame f;
+  f.set_buttons(static_cast<std::uint16_t>(raw[kBtnOffset] | (raw[kBtnOffset + 1] << 8)));
+  f.lx = read_float(raw, kLxOffset);
+  f.rx = read_float(raw, kRxOffset);
+  f.ry = read_float(raw, kRyOffset);
+  f.ly = read_float(raw, kLyOffset);
+  return f;
+}
+
+std::array<std::uint8_t, 40> RemoteFrame::encode() const
+{
+  std::array<std::uint8_t, 40> raw{};
+  const std::uint16_t b = buttons();
   raw[kBtnOffset] = static_cast<std::uint8_t>(b & 0xFF);
   raw[kBtnOffset + 1] = static_cast<std::uint8_t>(b >> 8);
   write_float(raw, kLxOffset, lx);

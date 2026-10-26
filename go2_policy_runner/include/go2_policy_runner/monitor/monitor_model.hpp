@@ -77,6 +77,11 @@ struct Snapshot
   std::array<int, 4> foot_force{0, 0, 0, 0};
   std::array<std::uint8_t, 40> wireless_remote{};
 
+  // --- remote topic (input_teleop: DualShock 4 / keyboard) ---
+  bool have_remote_topic{false};
+  double remote_topic_age{1e9};
+  std::array<std::uint8_t, 40> remote_topic{};  ///< encoded like LowState.wireless_remote
+
   // --- command ---
   bool have_cmd_vel{false};
   double cmd_vel_age{1e9};

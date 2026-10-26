@@ -18,6 +18,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 
+#include "go2_policy_runner/input/input_mapping.hpp"
 #include "go2_policy_runner/remote/unitree_remote.hpp"
 #include "unitree_go/msg/low_state.hpp"
 
@@ -30,10 +31,10 @@ public:
   explicit RemoteTeleopNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
   : rclcpp::Node("remote_teleop", options)
   {
-    max_vx_ = declare_parameter<double>("max_vx", 1.0);
-    max_vy_ = declare_parameter<double>("max_vy", 0.5);
-    max_wz_ = declare_parameter<double>("max_wz", 1.0);
-    deadzone_ = declare_parameter<double>("deadzone", 0.05);
+    limits_.max_vx = declare_parameter<double>("max_vx", 1.0);
+    limits_.max_vy = declare_parameter<double>("max_vy", 0.5);
+    limits_.max_wz = declare_parameter<double>("max_wz", 1.0);
+    limits_.deadzone = declare_parameter<double>("deadzone", 0.05);
     publish_when_idle_ = declare_parameter<bool>("publish_when_idle", false);
     const double rate = declare_parameter<double>("rate", 50.0);
 
@@ -51,14 +52,6 @@ public:
   }
 
 private:
-  double shape(float v) const
-  {
-    const double a = std::fabs(v);
-    if (a < deadzone_) {return 0.0;}
-    // rescale so the output starts at 0 right after the deadzone
-    return std::copysign(std::min(1.0, (a - deadzone_) / (1.0 - deadzone_)), v);
-  }
-
   void tick()
   {
     std::array<std::uint8_t, 40> raw;
@@ -74,15 +67,15 @@ private:
       return;
     }
     was_connected_ = connected;
-    const auto f = RemoteFrame::decode(raw);
+    const auto v = input::velocity_from_frame(RemoteFrame::decode(raw), limits_);
     geometry_msgs::msg::Twist cmd;
-    cmd.linear.x = shape(f.ly) * max_vx_;
-    cmd.linear.y = -shape(f.lx) * max_vy_;
-    cmd.angular.z = -shape(f.rx) * max_wz_;
+    cmd.linear.x = v.vx;
+    cmd.linear.y = v.vy;
+    cmd.angular.z = v.wz;
     pub_->publish(cmd);
   }
 
-  double max_vx_, max_vy_, max_wz_, deadzone_;
+  input::TeleopLimits limits_;
   bool publish_when_idle_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_;
   rclcpp::Subscription<unitree_go::msg::LowState>::SharedPtr sub_;

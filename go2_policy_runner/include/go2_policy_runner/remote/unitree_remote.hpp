@@ -8,6 +8,7 @@
 // Changes by unitree-go2-rl contributors (2026):
 //   - time is injected (no hidden steady_clock calls)
 //   - frame encode/decode without type punning, raw stick values, key aliases
+//   - button bitfield accessors (for unitree_go/WirelessController)
 //
 // Decoder for the 40-byte Unitree wireless remote frame (LowState.wireless_remote).
 
@@ -35,6 +36,10 @@ struct RemoteFrame
   std::array<std::uint8_t, 40> encode() const;
   /// True if every byte of the frame is zero (no remote connected / no data).
   static bool is_empty(const std::array<std::uint8_t, 40> & raw);
+
+  /// 16-bit button field, same bit layout as the frame and unitree_go/WirelessController.keys.
+  std::uint16_t buttons() const;
+  void set_buttons(std::uint16_t bits);
 };
 
 /// Edge/hold tracking for one key (same semantics as unitree::common::KeyBase).

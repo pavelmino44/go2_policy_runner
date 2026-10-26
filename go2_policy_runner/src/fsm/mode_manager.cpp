@@ -9,6 +9,7 @@
 // Changes by unitree-go2-rl contributors (2026):
 //   - no internal thread: update() is driven by the caller
 //   - fault input, thread-safe external transition requests, exception fallback
+//   - modes are told which mode was active before them
 
 #include "go2_policy_runner/fsm/mode_manager.hpp"
 
@@ -59,14 +60,15 @@ void ModeManager::switch_to(
   Mode * next, const std::string & reason, const ControlInput & in, JointCommand & cmd)
 {
   const std::string from = current_ ? current_->name() : "";
+  const ControlInput enter_in{in.state, in.command, in.time, from};
   if (current_) {current_->exit();}
   current_ = next;
   try {
-    current_->enter(in, cmd);
+    current_->enter(enter_in, cmd);
   } catch (const std::exception & e) {
     if (current_ == fallback_) {throw;}  // nothing safer left
     current_ = fallback_;
-    current_->enter(in, cmd);
+    current_->enter(enter_in, cmd);
     {
       std::lock_guard<std::mutex> lock(mutex_);
       last_reason_ = "entering '" + next->name() + "' failed: " + e.what();

@@ -14,12 +14,14 @@
 // Built-in modes:
 //   passive    - joint damping only (kp = 0). Safe state, also the fallback for every error.
 //   fix_stand  - interpolate from the current pose through a list of key poses (stand up / sit down).
+//                The list may depend on the previous mode (e.g. walk -> stand goes straight up).
 //   rl_policy  - run an exported IsaacLab policy (deploy.yaml + policy.onnx).
 
 #pragma once
 
 #include <chrono>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -62,13 +64,28 @@ public:
   void enter(const ControlInput & in, JointCommand & cmd) override;
   void run(const ControlInput & in, JointCommand & cmd) override;
 
-  /// True once the last pose has been reached.
+  /// Use a different pose sequence when the mode is entered from `previous_mode`.
+  void add_sequence_from(
+    const std::string & previous_mode, std::vector<std::vector<float>> poses,
+    std::vector<double> durations);
+  /// Sources that have their own sequence.
+  std::vector<std::string> sequence_sources() const;
+
+  /// True once the last pose of the active sequence has been reached.
   bool finished(double time) const;
 
 private:
+  struct Sequence
+  {
+    std::vector<std::vector<float>> poses;
+    std::vector<double> durations;
+  };
+  void validate(const Sequence & s, const std::string & what) const;
+
   std::vector<float> kp_, kd_;
-  std::vector<std::vector<float>> poses_;
-  std::vector<double> durations_;
+  Sequence default_;
+  std::map<std::string, Sequence> by_source_;
+  const Sequence * active_{&default_};
   Interpolation interpolation_;
   std::vector<float> start_pose_;
   double t0_{0.0};

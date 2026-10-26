@@ -173,7 +173,12 @@ void draw(const Snapshot & s, const std::vector<Alert> & alerts, const Threshold
   } else {
     put(y++, 1, COLOR_PAIR(kDim), "policy   -");
   }
-  if (s.have_lowstate && !go2_policy_runner::RemoteFrame::is_empty(s.wireless_remote)) {
+  if (s.have_remote_topic && s.remote_topic_age < 0.5) {
+    // input_teleop (DualShock 4 / keyboard) on the remote topic
+    const auto f = go2_policy_runner::RemoteFrame::decode(s.remote_topic);
+    put(y++, 1, 0, "remote*  [%-28s]  lx %+5.2f  ly %+5.2f  rx %+5.2f  ry %+5.2f",
+      pressed_buttons(f).c_str(), f.lx, f.ly, f.rx, f.ry);
+  } else if (s.have_lowstate && !go2_policy_runner::RemoteFrame::is_empty(s.wireless_remote)) {
     const auto f = go2_policy_runner::RemoteFrame::decode(s.wireless_remote);
     put(y++, 1, 0, "remote   [%-28s]  lx %+5.2f  ly %+5.2f  rx %+5.2f  ry %+5.2f",
       pressed_buttons(f).c_str(), f.lx, f.ly, f.rx, f.ry);

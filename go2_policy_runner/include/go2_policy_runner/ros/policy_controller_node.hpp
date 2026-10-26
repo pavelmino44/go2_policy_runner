@@ -5,6 +5,8 @@
 //
 //   subscribes  lowstate  (unitree_go/LowState)       robot state, incl. wireless remote
 //               cmd_vel   (geometry_msgs/Twist)       base velocity command for rl_policy modes
+//               remote    (unitree_go/WirelessController) remote buttons/sticks from input_teleop,
+//                                                     only with remote_source = topic
 //   publishes   lowcmd    (unitree_go/LowCmd)         motor commands (with CRC)
 //               ~/state   (ControllerState)           FSM / health, latched
 //               ~/policy_step (PolicyStep)            observations / actions of every policy step
@@ -15,6 +17,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -35,6 +38,7 @@
 #include "go2_policy_runner_interfaces/srv/set_mode.hpp"
 #include "unitree_go/msg/low_cmd.hpp"
 #include "unitree_go/msg/low_state.hpp"
+#include "unitree_go/msg/wireless_controller.hpp"
 
 namespace go2_policy_runner::ros
 {
@@ -55,6 +59,7 @@ private:
   using ControllerState = go2_policy_runner_interfaces::msg::ControllerState;
   using PolicyStep = go2_policy_runner_interfaces::msg::PolicyStep;
   using SetMode = go2_policy_runner_interfaces::srv::SetMode;
+  using WirelessController = unitree_go::msg::WirelessController;
 
   // --- setup ---
   void load_parameters();
@@ -73,6 +78,7 @@ private:
   void publish_policy_step(const fsm::PolicyStepInfo & info);
   void on_lowstate(const LowState::SharedPtr msg);
   void on_cmd_vel(const geometry_msgs::msg::Twist::SharedPtr msg);
+  void on_remote(const WirelessController::SharedPtr msg);
   void on_set_mode(
     const std::shared_ptr<SetMode::Request> req, std::shared_ptr<SetMode::Response> res);
   double now_s() const;
@@ -82,6 +88,8 @@ private:
   double control_rate_{500.0};
   double lowstate_timeout_{0.1};
   double cmd_vel_timeout_{0.5};
+  bool remote_from_topic_{false};  // remote_source: lowstate (Unitree remote) | topic
+  double remote_timeout_{0.5};
   double state_rate_{10.0};
   bool publish_policy_step_{true};
   int onnx_threads_{1};
@@ -97,6 +105,7 @@ private:
   rclcpp::CallbackGroup::SharedPtr control_group_, io_group_;
   rclcpp::Subscription<LowState>::SharedPtr lowstate_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Subscription<WirelessController>::SharedPtr remote_sub_;
   rclcpp::Publisher<LowCmd>::SharedPtr lowcmd_pub_;
   rclcpp::Publisher<ControllerState>::SharedPtr state_pub_;
   rclcpp::Publisher<PolicyStep>::SharedPtr policy_step_pub_;
@@ -121,6 +130,8 @@ private:
   double lowstate_rate_window_start_{0.0};
   VelocityCommand cmd_vel_;
   double last_cmd_vel_time_{-1.0};
+  std::array<std::uint8_t, 40> remote_frame_{};  // remote_source = topic: encoded remote frame
+  double last_remote_time_{-1.0};
 
   std::mutex cmd_mutex_;  // guards lowcmd_msg_ / joint_cmd_ (control thread vs. safe_stop)
   JointCommand joint_cmd_;

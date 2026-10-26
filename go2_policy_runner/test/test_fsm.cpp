@@ -198,3 +198,64 @@ TEST(Fsm, InvalidConfigurationIsRejected)
   int calls = 0;
   EXPECT_THROW(RlPolicyMode("w", kN, make_env(&calls), 333.0, 1.0), std::invalid_argument);
 }
+
+TEST(Fsm, FixStandSequenceDependsOnPreviousMode)
+{
+  const std::vector<float> lie(kN, -2.0f);
+  FixStandMode stand(
+    "stand", kN, std::vector<float>(kN, 60.0f), std::vector<float>(kN, 5.0f),
+    {lie, kStand}, {1.0, 1.0}, FixStandMode::Interpolation::kLinear);
+  stand.add_sequence_from("walk", {kStand}, {0.5});
+  EXPECT_EQ(stand.sequence_sources(), std::vector<std::string>{"walk"});
+
+  RobotState state(kN);  // q = 0
+  VelocityCommand cmd;
+  JointCommand out(kN);
+
+  // from passive: default sequence, first towards the lying pose
+  stand.enter(ControlInput{state, cmd, 0.0, "passive"}, out);
+  stand.run(ControlInput{state, cmd, 0.5}, out);
+  EXPECT_FLOAT_EQ(out[2].q, -1.0f);
+  EXPECT_FALSE(stand.finished(1.5));
+
+  // from walk: straight to the standing pose, never through the lying pose
+  stand.enter(ControlInput{state, cmd, 10.0, "walk"}, out);
+  for (double t = 10.0; t <= 10.6; t += 0.01) {
+    stand.run(ControlInput{state, cmd, t}, out);
+    for (std::size_t i = 0; i < kN; ++i) {
+      EXPECT_GE(out[i].q, std::min(0.0f, kStand[i]) - 1e-5f);
+      EXPECT_LE(out[i].q, std::max(0.0f, kStand[i]) + 1e-5f);
+    }
+  }
+  EXPECT_FLOAT_EQ(out[2].q, kStand[2]);
+  EXPECT_TRUE(stand.finished(10.5));
+
+  EXPECT_THROW(stand.add_sequence_from("sit", {kStand}, {}), std::invalid_argument);
+}
+
+TEST(Fsm, ModesAreToldThePreviousMode)
+{
+  struct Probe : Mode
+  {
+    using Mode::Mode;
+    std::string seen{"<none>"};
+    std::string type() const override {return "probe";}
+    void enter(const ControlInput & in, JointCommand &) override {seen = in.previous_mode;}
+    void run(const ControlInput &, JointCommand &) override {}
+  };
+  auto probe = std::make_unique<Probe>("probe", kN);
+  auto * p = probe.get();
+  auto passive = std::make_unique<PassiveMode>("passive", kN, std::vector<float>(kN, 3.0f));
+  passive->add_transition("probe", "");
+  std::vector<std::unique_ptr<Mode>> modes;
+  modes.push_back(std::move(passive));
+  modes.push_back(std::move(probe));
+  ModeManager fsm(std::move(modes), "passive", "passive");
+  RobotState state(kN);
+  VelocityCommand cmd;
+  JointCommand out(kN);
+  fsm.update(ControlInput{state, cmd, 0.0}, out);
+  ASSERT_EQ(fsm.request("probe", "test"), "");
+  fsm.update(ControlInput{state, cmd, 0.002}, out);
+  EXPECT_EQ(p->seen, "passive");
+}

@@ -25,6 +25,12 @@ policy_controller:
     control_rate: 500.0          # [Hz] lowcmd publish rate; step_dt * control_rate must be an integer
     lowstate_timeout: 0.1        # [s] no lowstate for this long -> fallback (passive)
     cmd_vel_timeout: 0.5         # [s] no cmd_vel for this long -> zero velocity command
+    # Remote for the FSM expressions:
+    #   lowstate - Unitree wireless remote (LowState.wireless_remote)
+    #   topic    - unitree_go/WirelessController on `remote` (input_teleop: DualShock 4 / keyboard)
+    # Set by the launch argument input:=...
+    remote_source: lowstate
+    remote_timeout: 0.5          # [s] remote topic older than this -> nothing pressed
     state_rate: 10.0             # [Hz] ~/state publish rate
     publish_policy_step: true    # publish ~/policy_step (obs / actions) for logging
     onnx_threads: 1
@@ -77,6 +83,12 @@ policy_controller:
         sequence: [lie, stand]     # fold the legs first, then stand up
         durations: [1.0, 1.5]      # [s] to reach each pose
         interpolation: smooth      # smooth | linear
+        # Optional sequences that depend on the previous mode. Coming from walk the robot is
+        # already up: go straight to the standing pose instead of lying down first.
+        from:
+          walk:
+            sequence: [stand]
+            durations: [1.0]
         transitions:
           passive: "LT + B.on_pressed"
           walk: "start.on_pressed"
@@ -109,6 +121,44 @@ remote_teleop:
     max_wz: 1.0          # [rad/s] right stick left
     deadzone: 0.05
     publish_when_idle: false   # publish zeros even when no remote frame is present
+
+# DualShock 4 / keyboard instead of the Unitree remote (launch argument input:=dualshock4|keyboard).
+# Publishes `remote` (buttons + sticks in the Unitree layout, for the FSM) and `cmd_vel`.
+input_teleop:
+  ros__parameters:
+    device: dualshock4   # dualshock4 | keyboard (set by the launch argument input:=...)
+    device_path: ""      # e.g. /dev/input/event7; "" = find it automatically
+    device_name: ""      # substring of the device name to choose between several devices
+    rate: 50.0
+    max_vx: 1.0          # [m/s]
+    max_vy: 0.5          # [m/s]
+    max_wz: 1.0          # [rad/s]
+    deadzone: 0.05
+    gamepad:
+      trigger_threshold: 0.5   # L2 / R2 analog value that counts as pressed
+    keyboard:
+      toggle_key: F12          # switches keyboard control on / off
+      grab: true               # while on, other programs get no keys from this keyboard
+      stick: 0.5               # stick deflection of the movement keys (fast: 1.0)
+      combo_delay: 0.15        # [s] "LT + A": A is pressed this long after LT
+      # "<KEY>: <target>": remote buttons joined with +, a stick direction or fast.
+      # Key names: Linux KEY_* without the prefix (W, 1, SPACE, UP, LEFTSHIFT, F1, KP0, ...)
+      bindings:
+        - "W: ly+"
+        - "S: ly-"
+        - "A: lx-"
+        - "D: lx+"
+        - "Q: rx-"
+        - "E: rx+"
+        - "LEFTSHIFT: fast"
+        - "SPACE: LT + B"      # passive (damping)
+        - "1: LT + A"          # stand
+        - "2: start"           # walk
+        - "3: LT + down"       # sit
+        - "UP: up"
+        - "DOWN: down"
+        - "LEFT: left"
+        - "RIGHT: right"
 
 # Terminal monitor: ros2 run go2_policy_runner robot_monitor --ros-args --params-file <this file>
 robot_monitor:

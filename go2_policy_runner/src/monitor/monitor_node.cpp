@@ -3,6 +3,8 @@
 
 #include "go2_policy_runner/monitor/monitor_node.hpp"
 
+#include "go2_policy_runner/remote/unitree_remote.hpp"
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -154,6 +156,21 @@ MonitorNode::MonitorNode(const rclcpp::NodeOptions & options)
       data_.cmd_vel = {m->linear.x, m->linear.y, m->angular.z};
     });
 
+  remote_sub_ = create_subscription<unitree_go::msg::WirelessController>(
+    "remote", rclcpp::QoS(10).best_effort(),
+    [this](const unitree_go::msg::WirelessController::SharedPtr m) {
+      RemoteFrame f;
+      f.set_buttons(m->keys);
+      f.lx = m->lx;
+      f.ly = m->ly;
+      f.rx = m->rx;
+      f.ry = m->ry;
+      std::lock_guard<std::mutex> lock(mutex_);
+      t_remote_ = now_s();
+      data_.have_remote_topic = true;
+      data_.remote_topic = f.encode();
+    });
+
   if (publish_diagnostics_) {
     diag_pub_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
   }
@@ -178,6 +195,7 @@ monitor::Snapshot MonitorNode::snapshot()
   s.lowstate_age = age(t_lowstate_);
   s.cmd_vel_age = age(t_cmd_vel_);
   s.policy_age = age(t_policy_);
+  s.remote_topic_age = age(t_remote_);
   if (s.nominal_lowstate_rate <= 0.0) {s.nominal_lowstate_rate = nominal_lowstate_rate_;}
   return s;
 }

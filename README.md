@@ -30,6 +30,9 @@ the DDS network interface changes between the two.
   damping (`passive`), interpolated poses (`fix_stand`) and learned policies (`rl_policy`).
   Transitions can be triggered from the Unitree remote, using the same expression syntax as
   `unitree_rl_lab/deploy`.
+- **Several control devices.** The Unitree wireless remote, a DualShock 4 or the keyboard of
+  the computer. The gamepad and the keyboard are mapped onto the Unitree remote layout, so the
+  same FSM expressions work with all of them.
 - **Safety layer.** The controller switches to damping when `lowstate` stops arriving, when
   the base tilts too far, or when a mode throws an error. It also enforces hard joint
   position-target limits, refuses to start if another process is publishing `lowcmd`, and puts
@@ -40,7 +43,7 @@ the DDS network interface changes between the two.
 | Package | Contents |
 |---|---|
 | `go2_policy_runner_interfaces` | `ControllerState.msg`, `PolicyStep.msg`, `SetMode.srv` |
-| `go2_policy_runner` | Core library (policy environment, ONNX Runtime, FSM, remote decoder), `policy_controller`, `remote_teleop` and `robot_monitor` nodes, launch file, Go2 config |
+| `go2_policy_runner` | Core library (policy environment, ONNX Runtime, FSM, remote decoder, input devices), `policy_controller`, `remote_teleop`, `input_teleop` and `robot_monitor` nodes, launch file, Go2 config |
 
 ## Architecture
 
@@ -49,13 +52,15 @@ flowchart LR
     robot["unitree_mujoco<br/>or Unitree Go2"]
     ctrl["<b>policy_controller</b><br/>FSM: passive · fix_stand · rl_policy<br/>rl_policy: deploy.yaml + policy.onnx"]
     teleop["remote_teleop"]
-    user["your node · teleop_twist_keyboard · Nav2"]
+    inputs["input_teleop<br/>DualShock 4 · keyboard"]
+    user["your node · Nav2"]
     out["~/state<br/>~/policy_step"]
 
     robot -- "/lowstate" --> ctrl
     ctrl -- "/lowcmd<br/>(with CRC)" --> robot
     robot -- "/lowstate<br/>(wireless_remote)" --> teleop
     teleop -- "/cmd_vel" --> ctrl
+    inputs -. "/remote<br/>/cmd_vel" .-> ctrl
     user -. "/cmd_vel" .-> ctrl
     user -. "~/set_mode" .-> ctrl
     ctrl --> out
@@ -67,6 +72,7 @@ flowchart LR
 |---|---|---|
 | `lowstate` (sub) | `unitree_go/LowState` | Robot state, including the wireless remote |
 | `cmd_vel` (sub) | `geometry_msgs/Twist` | Base velocity command for `rl_policy` modes (`linear.x`, `linear.y`, `angular.z`). Falls back to zero after `cmd_vel_timeout` |
+| `remote` (sub) | `unitree_go/WirelessController` | Remote for the FSM when `remote_source: topic` (published by `input_teleop`). Reads as "nothing pressed" after `remote_timeout` |
 | `lowcmd` (pub) | `unitree_go/LowCmd` | Motor commands, published at `control_rate` |
 | `~/state` (pub, latched) | `go2_policy_runner_interfaces/ControllerState` | Active mode, allowed transitions, health and loop rates |
 | `~/policy_step` (pub) | `go2_policy_runner_interfaces/PolicyStep` | Observations, raw actions, joint targets and inference time for every policy step |
@@ -76,7 +82,46 @@ flowchart LR
 
 Converts the Unitree remote sticks into `/cmd_vel`. Left stick: forward and sideways. Right
 stick: yaw. In `unitree_mujoco`, a gamepad emulates the remote when `use_joystick: 1` is set.
-Disable this node (`teleop:=false`) if something else publishes `/cmd_vel`.
+Started with `input:=unitree` (default).
+
+### `input_teleop`
+
+Reads a DualShock 4 or a keyboard directly from `/dev/input` (evdev) on the computer running
+the launch file. It publishes `/remote` (`unitree_go/WirelessController`, buttons and sticks in
+the Unitree remote layout) for the FSM and `/cmd_vel` with the same stick mapping as
+`remote_teleop`. Started with `input:=dualshock4` or `input:=keyboard`; the controller then
+takes the FSM remote from `/remote` instead of `lowstate`. If the device is lost, a zero
+`cmd_vel` is sent and publishing stops: the controller sees no buttons pressed and a zero
+velocity command.
+
+DualShock 4 (USB or Bluetooth; Xbox-compatible pads use the same mapping):
+
+| DualShock 4 | Unitree remote | DualShock 4 | Unitree remote |
+|---|---|---|---|
+| cross | `A` | L1 / R1 | `LB` / `RB` |
+| circle | `B` | L2 / R2 | `LT` / `RT` |
+| square | `X` | options | `start` |
+| triangle | `Y` | share | `back` |
+| d-pad | `up` `down` `left` `right` | L3 / R3 | `F1` / `F2` |
+| left stick | forward, sideways | right stick | yaw |
+
+Keyboard. The keys are read from the device, so they work in any window. Keyboard control
+starts **off**: `F12` switches it on and off. While it is on, the keyboard is grabbed, so other
+programs get no keys (no typing and no `Ctrl-C` in terminals) until `F12` is pressed again.
+Default bindings (`input_teleop.keyboard.bindings`):
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `W` / `S` | forward / back | `Space` | `LT + B`: passive |
+| `A` / `D` | left / right | `1` | `LT + A`: stand |
+| `Q` / `E` | turn left / right | `2` | `start`: walk |
+| `Left Shift` | full speed while held | `3` | `LT + down`: sit |
+| arrows | d-pad | | |
+
+A binding with several buttons presses the last one `combo_delay` later, so `LT + A.on_pressed`
+sees `LT` already held. Reading `/dev/input` needs permissions: gamepads are usually readable by
+the logged-in user, keyboards need the `input` group
+(`sudo usermod -aG input $USER`, then log in again).
 
 ### `robot_monitor`
 
@@ -88,7 +133,8 @@ time and action range, battery and foot forces, and a list of active alerts.
 The monitor is read-only. Its only action is `space`, which requests `passive` through
 `~/set_mode`. `q` quits. It also publishes one `diagnostic_msgs/DiagnosticStatus` per category
 on `/diagnostics` (`publish_diagnostics: false` turns this off). Alert thresholds are in the
-`robot_monitor` section of `config/go2.yaml`. The terminal must be at least 80×40.
+`robot_monitor` section of `config/go2.yaml`. The terminal must be at least 80×40. The remote
+line shows `remote*` when the remote comes from `input_teleop`.
 
 ### Startup sequence
 
@@ -110,7 +156,8 @@ Default Go2 configuration (`config/go2.yaml`). Remote key combinations follow
 | `passive` | `stand` | `LT + A` | Fold the legs, then stand up |
 | `stand` | `walk` | `start` | Run the RL policy |
 | `stand`, `walk` | `sit` | `LT + down` | Lie down |
-| `sit`, `walk` | `stand` | `LT + A` | |
+| `sit` | `stand` | `LT + A` | Stand up from the lying pose |
+| `walk` | `stand` | `LT + A` | Go straight to the standing pose (`fsm.stand.from.walk`) |
 
 Each control cycle picks at most one transition. The first applicable source wins, in this
 order:
@@ -177,7 +224,8 @@ The launch file configures DDS for all the nodes it starts:
 | `domain_id` | `0` | DDS domain. Unitree robots use 0 |
 | `policy_dir` | | Policy for `rl_policy` modes that don't set their own `policy_dir` |
 | `config` | `config/go2.yaml` | Parameter file |
-| `teleop` | `true` | Start `remote_teleop` |
+| `input` | `unitree` | Control device: `unitree` (wireless remote, `remote_teleop`), `dualshock4` or `keyboard` (`input_teleop`), `none` (no teleop node; the FSM listens to the Unitree remote) |
+| `input_device` | | `dualshock4` / `keyboard`: `/dev/input/eventN` to use. Empty: found automatically |
 | `log_level` | `info` | |
 
 `policy_dir` accepts:
@@ -202,6 +250,7 @@ use_joystick: 1     # optional: a gamepad emulates the Unitree remote
 ./unitree_mujoco
 ros2 launch go2_policy_runner policy_runner.launch.py network_interface:=lo \
     policy_dir:=/path/to/unitree_rl_lab/logs/rsl_rl/unitree_go2_velocity
+# with a DualShock 4 or the keyboard instead of the Unitree remote: input:=dualshock4 / input:=keyboard
 ```
 
 To check the wiring without a trained policy, use `policy_dir:=go2_zero_smoke_test`. This
@@ -233,7 +282,7 @@ ros2 run go2_policy_runner robot_monitor --ros-args \
 ros2 topic echo /policy_controller/state
 ros2 service call /policy_controller/set_mode go2_policy_runner_interfaces/srv/SetMode "{mode: stand}"
 ros2 service call /policy_controller/set_mode go2_policy_runner_interfaces/srv/SetMode "{mode: walk}"
-ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}}"    # with teleop:=false
+ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}}"    # with input:=none
 ros2 bag record /policy_controller/policy_step /lowstate /lowcmd /cmd_vel
 ```
 
@@ -249,6 +298,8 @@ motors.
 | `control_rate` | 500 | `lowcmd` rate in Hz. `step_dt × control_rate` must be an integer |
 | `lowstate_timeout` | 0.1 | Seconds without `lowstate` before the controller falls back to `passive` |
 | `cmd_vel_timeout` | 0.5 | Seconds without `cmd_vel` before the command falls back to zero |
+| `remote_source` | `lowstate` | FSM remote: `lowstate` (Unitree remote) or `topic` (`/remote` from `input_teleop`). Set by the `input` launch argument |
+| `remote_timeout` | 0.5 | `remote_source: topic`: seconds without `/remote` before all buttons count as released |
 | `motion_switcher.mode` | `auto` | `auto`: release the sport mode if the service exists. `release`: the service is required. `skip`: never touch it |
 | `lowcmd_check_duration` | 0.5 | Seconds to listen for other `lowcmd` publishers before starting. `0` disables the check |
 | `joint_limits.lower` / `.upper` | from `go2.xml` | Hard limits on the position targets of every mode |
@@ -261,7 +312,7 @@ Mode types and their parameters:
 | Type | Parameters | Behaviour |
 |---|---|---|
 | `passive` | `kd` | Damping only (`kp = 0`). Used as the fallback mode |
-| `fix_stand` | `kp`, `kd`, `sequence`, `durations`, `interpolation` (`smooth` or `linear`) | Interpolates from the current pose through the listed key poses |
+| `fix_stand` | `kp`, `kd`, `sequence`, `durations`, `interpolation` (`smooth` or `linear`), optional `from.<mode>.sequence` / `.durations` | Interpolates from the current pose through the listed key poses. When entered from `<mode>`, uses the `from.<mode>` sequence instead |
 | `rl_policy` | `policy_dir`, `max_tilt` | Runs an exported policy. Gains come from `deploy.yaml` |
 
 To run several policies, add several `rl_policy` modes, each with its own `policy_dir`.

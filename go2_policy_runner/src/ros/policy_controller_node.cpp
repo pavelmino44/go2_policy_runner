@@ -68,6 +68,12 @@ PolicyControllerNode::PolicyControllerNode(const rclcpp::NodeOptions & options)
   cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
     "cmd_vel", rclcpp::QoS(10),
     [this](const geometry_msgs::msg::Twist::SharedPtr msg) {on_cmd_vel(msg);}, io_options);
+  if (remote_from_topic_) {
+    // FSM remote input from input_teleop (DualShock 4 / keyboard) instead of LowState
+    remote_sub_ = create_subscription<WirelessController>(
+      "remote", rclcpp::QoS(10),
+      [this](const WirelessController::SharedPtr msg) {on_remote(msg);}, io_options);
+  }
   state_pub_ = create_publisher<ControllerState>(
     "~/state", rclcpp::QoS(1).reliable().transient_local());
   if (publish_policy_step_) {
@@ -94,8 +100,9 @@ PolicyControllerNode::PolicyControllerNode(const rclcpp::NodeOptions & options)
   std::string mode_list;
   for (const auto & n : fsm_->mode_names()) {mode_list += (mode_list.empty() ? "" : ", ") + n;}
   RCLCPP_INFO(
-    get_logger(), "policy_controller: %zu motors, control %.0f Hz, modes: %s",
-    num_motors_, control_rate_, mode_list.c_str());
+    get_logger(), "policy_controller: %zu motors, control %.0f Hz, modes: %s, remote from %s",
+    num_motors_, control_rate_, mode_list.c_str(),
+    remote_from_topic_ ? remote_sub_->get_topic_name() : "lowstate");
 
   startup_thread_ = std::thread([this]() {startup_sequence();});
 }
@@ -121,6 +128,12 @@ void PolicyControllerNode::load_parameters()
   if (control_rate_ <= 0.0) {throw std::runtime_error("control_rate must be > 0");}
   lowstate_timeout_ = param<double>(*this, "lowstate_timeout", 0.1);
   cmd_vel_timeout_ = param<double>(*this, "cmd_vel_timeout", 0.5);
+  const auto remote_source = param<std::string>(*this, "remote_source", "lowstate");
+  if (remote_source != "lowstate" && remote_source != "topic") {
+    throw std::runtime_error("remote_source must be lowstate | topic");
+  }
+  remote_from_topic_ = remote_source == "topic";
+  remote_timeout_ = param<double>(*this, "remote_timeout", 0.5);
   state_rate_ = param<double>(*this, "state_rate", 10.0);
   publish_policy_step_ = param<bool>(*this, "publish_policy_step", true);
   onnx_threads_ = static_cast<int>(param<int64_t>(*this, "onnx_threads", 1));
@@ -156,6 +169,7 @@ void PolicyControllerNode::load_parameters()
 //   fsm.fallback: passive
 //   fsm.<mode>.type: passive | fix_stand | rl_policy
 //   fsm.<mode>.transitions.<target>: "<remote expression>"   ("" = only via ~/set_mode)
+//   fsm.<mode>.from.<previous>.sequence/durations           (fix_stand only, optional)
 //   poses.<name>: [...]                    shared key poses (SDK order)
 // =============================================================================================
 std::unique_ptr<fsm::ModeManager> PolicyControllerNode::build_fsm()
@@ -216,13 +230,33 @@ std::unique_ptr<fsm::Mode> PolicyControllerNode::build_mode(const std::string & 
     if (interp != "smooth" && interp != "linear") {
       throw std::runtime_error("interpolation must be smooth | linear");
     }
-    return std::make_unique<fsm::FixStandMode>(
+    auto mode = std::make_unique<fsm::FixStandMode>(
       name, num_motors_,
       motor_array(required_param(*this, p + ".kp"), num_motors_),
       motor_array(required_param(*this, p + ".kd"), num_motors_),
       poses, durations,
       interp == "smooth" ? fsm::FixStandMode::Interpolation::kSmooth :
       fsm::FixStandMode::Interpolation::kLinear);
+    // Optional: a different sequence when entered from a given mode,
+    //   fsm.<mode>.from.<previous_mode>.sequence / .durations
+    const auto all_modes = get_parameter("fsm.modes").as_string_array();
+    for (const auto & src : child_names(*this, p + ".from")) {
+      if (std::find(all_modes.begin(), all_modes.end(), src) == all_modes.end()) {
+        throw std::runtime_error("from." + src + ": '" + src + "' is not in fsm.modes");
+      }
+      const std::string fp = p + ".from." + src;
+      std::vector<std::vector<float>> src_poses;
+      // copy: as_string_array() returns a reference into the temporary Parameter
+      const std::vector<std::string> src_sequence =
+        required_param(*this, fp + ".sequence").as_string_array();
+      for (const auto & s : src_sequence) {src_poses.push_back(pose(p, s));}
+      std::vector<double> src_durations;
+      for (float d : float_array(required_param(*this, fp + ".durations"))) {
+        src_durations.push_back(d);
+      }
+      mode->add_sequence_from(src, std::move(src_poses), std::move(src_durations));
+    }
+    return mode;
   }
 
   if (type == "rl_policy") {
@@ -416,6 +450,19 @@ void PolicyControllerNode::on_cmd_vel(const geometry_msgs::msg::Twist::SharedPtr
   last_cmd_vel_time_ = now_s();
 }
 
+void PolicyControllerNode::on_remote(const WirelessController::SharedPtr msg)
+{
+  RemoteFrame f;
+  f.set_buttons(msg->keys);
+  f.lx = msg->lx;
+  f.ly = msg->ly;
+  f.rx = msg->rx;
+  f.ry = msg->ry;
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  remote_frame_ = f.encode();
+  last_remote_time_ = now_s();
+}
+
 void PolicyControllerNode::on_set_mode(
   const std::shared_ptr<SetMode::Request> req, std::shared_ptr<SetMode::Response> res)
 {
@@ -445,6 +492,11 @@ void PolicyControllerNode::control_cycle()
     state = robot_state_;
     age = t - last_lowstate_time_;
     if (last_cmd_vel_time_ >= 0.0 && t - last_cmd_vel_time_ <= cmd_vel_timeout_) {cmd = cmd_vel_;}
+    if (remote_from_topic_) {
+      // a stale remote reads as "nothing pressed"
+      const bool fresh = last_remote_time_ >= 0.0 && t - last_remote_time_ <= remote_timeout_;
+      state.wireless_remote = fresh ? remote_frame_ : std::array<std::uint8_t, 40>{};
+    }
   }
   std::optional<std::string> fault;
   if (age > lowstate_timeout_) {

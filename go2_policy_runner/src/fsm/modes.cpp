@@ -13,6 +13,7 @@
 // Changes by unitree-go2-rl contributors (2026):
 //   - policy inference runs in the control cycle (decimation) instead of a separate thread
 //   - smoothstep interpolation option, parameter validation
+//   - fix_stand: pose sequence selected by the previous mode
 //   - tilt safety check evaluated on every control cycle
 
 #include "go2_policy_runner/fsm/modes.hpp"
@@ -79,23 +80,46 @@ FixStandMode::FixStandMode(
   std::vector<std::vector<float>> poses, std::vector<double> durations,
   Interpolation interpolation)
 : Mode(std::move(name), num_motors), kp_(std::move(kp)), kd_(std::move(kd)),
-  poses_(std::move(poses)), durations_(std::move(durations)), interpolation_(interpolation)
+  default_{std::move(poses), std::move(durations)}, interpolation_(interpolation)
 {
   require_size(kp_, num_motors_, "fix_stand '" + name_ + "': kp");
   require_size(kd_, num_motors_, "fix_stand '" + name_ + "': kd");
-  if (poses_.empty()) {throw std::invalid_argument("fix_stand '" + name_ + "': no poses");}
-  if (durations_.size() != poses_.size()) {
-    throw std::invalid_argument("fix_stand '" + name_ + "': durations must match poses");
-  }
-  for (std::size_t k = 0; k < poses_.size(); ++k) {
-    require_size(poses_[k], num_motors_, "fix_stand '" + name_ + "': pose " + std::to_string(k));
-    if (durations_[k] < 0.0) {throw std::invalid_argument("fix_stand: negative duration");}
-  }
+  validate(default_, "fix_stand '" + name_ + "'");
   start_pose_.assign(num_motors_, 0.0f);
+}
+
+void FixStandMode::validate(const Sequence & s, const std::string & what) const
+{
+  if (s.poses.empty()) {throw std::invalid_argument(what + ": no poses");}
+  if (s.durations.size() != s.poses.size()) {
+    throw std::invalid_argument(what + ": durations must match poses");
+  }
+  for (std::size_t k = 0; k < s.poses.size(); ++k) {
+    require_size(s.poses[k], num_motors_, what + ": pose " + std::to_string(k));
+    if (s.durations[k] < 0.0) {throw std::invalid_argument(what + ": negative duration");}
+  }
+}
+
+void FixStandMode::add_sequence_from(
+  const std::string & previous_mode, std::vector<std::vector<float>> poses,
+  std::vector<double> durations)
+{
+  Sequence s{std::move(poses), std::move(durations)};
+  validate(s, "fix_stand '" + name_ + "' from '" + previous_mode + "'");
+  by_source_[previous_mode] = std::move(s);
+}
+
+std::vector<std::string> FixStandMode::sequence_sources() const
+{
+  std::vector<std::string> out;
+  for (const auto & kv : by_source_) {out.push_back(kv.first);}
+  return out;
 }
 
 void FixStandMode::enter(const ControlInput & in, JointCommand & cmd)
 {
+  const auto it = by_source_.find(in.previous_mode);
+  active_ = it == by_source_.end() ? &default_ : &it->second;
   start_pose_ = in.state.q;
   t0_ = in.time;
   for (std::size_t i = 0; i < num_motors_; ++i) {
@@ -109,24 +133,26 @@ void FixStandMode::enter(const ControlInput & in, JointCommand & cmd)
 bool FixStandMode::finished(double time) const
 {
   double total = 0.0;
-  for (double d : durations_) {total += d;}
+  for (double d : active_->durations) {total += d;}
   return time - t0_ >= total;
 }
 
 void FixStandMode::run(const ControlInput & in, JointCommand & cmd)
 {
+  const auto & poses = active_->poses;
+  const auto & durations = active_->durations;
   double t = in.time - t0_;
   const std::vector<float> * from = &start_pose_;
-  const std::vector<float> * to = &poses_.back();
+  const std::vector<float> * to = &poses.back();
   double alpha = 1.0;
-  for (std::size_t k = 0; k < poses_.size(); ++k) {
-    to = &poses_[k];
-    if (t < durations_[k]) {
-      alpha = durations_[k] > 0.0 ? t / durations_[k] : 1.0;
+  for (std::size_t k = 0; k < poses.size(); ++k) {
+    to = &poses[k];
+    if (t < durations[k]) {
+      alpha = durations[k] > 0.0 ? t / durations[k] : 1.0;
       break;
     }
-    t -= durations_[k];
-    from = &poses_[k];
+    t -= durations[k];
+    from = &poses[k];
     alpha = 1.0;
   }
   if (interpolation_ == Interpolation::kSmooth) {

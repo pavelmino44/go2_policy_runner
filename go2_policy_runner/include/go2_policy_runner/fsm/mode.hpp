@@ -10,6 +10,7 @@
 // Changes by unitree-go2-rl contributors (2026):
 //   - modes are pure functions of (state, command, time) -> joint command, no DDS/ROS inside
 //   - transitions stored per mode with compiled remote conditions
+//   - enter() knows the previous mode
 //
 // Controller modes (FSM states). A mode owns the joint command while it is active.
 
@@ -29,9 +30,15 @@ namespace go2_policy_runner::fsm
 /// Everything a mode may look at during one control cycle.
 struct ControlInput
 {
+  ControlInput(
+    const RobotState & s, const VelocityCommand & c, double t, std::string previous = {})
+  : state(s), command(c), time(t), previous_mode(std::move(previous)) {}
+
   const RobotState & state;
   const VelocityCommand & command;
   double time;  ///< monotonic time [s]
+  /// Name of the mode that was active before; set only for Mode::enter() ("" at startup).
+  std::string previous_mode;
 };
 
 class Mode

@@ -32,11 +32,13 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------------------------
-# Core: policy (IsaacLab env port + ONNX), remote controller, FSM. No ROS dependency.
+# Core: policy (IsaacLab env port + ONNX), remote controller, input devices, FSM. No ROS dependency.
 # ---------------------------------------------------------------------------------------------
 add_library(${PROJECT_NAME}_core SHARED
   src/remote/unitree_remote.cpp
   src/remote/remote_dsl.cpp
+  src/input/input_mapping.cpp
+  src/input/evdev_device.cpp
   src/policy/observation_manager.cpp
   src/policy/action_manager.cpp
   src/policy/policy_env.cpp
@@ -53,13 +55,14 @@ target_link_libraries(${PROJECT_NAME}_core
   PRIVATE onnxruntime::onnxruntime)
 
 # ---------------------------------------------------------------------------------------------
-# ROS 2 layer: components policy_controller and remote_teleop
+# ROS 2 layer: components policy_controller, remote_teleop and input_teleop
 # ---------------------------------------------------------------------------------------------
 add_library(${PROJECT_NAME}_ros SHARED
   src/ros/unitree_lowcmd.cpp
   src/ros/motion_switcher_client.cpp
   src/ros/policy_controller_node.cpp
   src/ros/remote_teleop_node.cpp
+  src/ros/input_teleop_node.cpp
 )
 target_link_libraries(${PROJECT_NAME}_ros PUBLIC ${PROJECT_NAME}_core)
 ament_target_dependencies(${PROJECT_NAME}_ros PUBLIC
@@ -71,6 +74,9 @@ rclcpp_components_register_nodes(${PROJECT_NAME}_ros
 rclcpp_components_register_node(${PROJECT_NAME}_ros
   PLUGIN "go2_policy_runner::ros::RemoteTeleopNode"
   EXECUTABLE remote_teleop)
+rclcpp_components_register_node(${PROJECT_NAME}_ros
+  PLUGIN "go2_policy_runner::ros::InputTeleopNode"
+  EXECUTABLE input_teleop)
 
 # Standalone controller with safe shutdown (damping before the context goes away)
 add_executable(policy_controller src/nodes/policy_controller_main.cpp)
@@ -116,6 +122,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_fsm ${PROJECT_NAME}_core)
   ament_add_gtest(test_monitor test/test_monitor.cpp)
   target_link_libraries(test_monitor ${PROJECT_NAME}_core)
+  ament_add_gtest(test_input test/test_input.cpp)
+  target_link_libraries(test_input ${PROJECT_NAME}_core)
 endif()
 
 ament_package()

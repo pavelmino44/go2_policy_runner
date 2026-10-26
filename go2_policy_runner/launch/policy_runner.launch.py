@@ -1,6 +1,6 @@
 # Copyright (c) 2026, unitree-go2-rl contributors.
 # SPDX-License-Identifier: Apache-2.0
-"""Run the Go2 policy controller (+ remote teleop) against the real robot or unitree_mujoco.
+"""Run the Go2 policy controller (+ teleop) against the real robot or unitree_mujoco.
 
 Simulation and robot use exactly the same nodes and configuration. The only difference is
 the DDS network interface the robot (or simulator) is reachable on:
@@ -12,11 +12,17 @@ the DDS network interface the robot (or simulator) is reachable on:
     # real Go2 on the Ethernet port enp3s0 (192.168.123.x)
     ros2 launch go2_policy_runner policy_runner.launch.py network_interface:=enp3s0 \
         policy_dir:=/path/to/logs/rsl_rl/unitree_go2_velocity
+
+Control device (input:=...):
+    unitree     Unitree wireless remote, read from LowState (remote_teleop -> cmd_vel)
+    dualshock4  DualShock 4 on this computer (input_teleop -> remote + cmd_vel)
+    keyboard    keyboard of this computer (input_teleop -> remote + cmd_vel), F12 = on / off
+    none        no teleop node; the FSM still listens to the Unitree remote, cmd_vel comes from
+                elsewhere
 """
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, SetEnvironmentVariable
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -61,13 +67,28 @@ def generate_launch_description():
             description='Policy directory for rl_policy modes without their own policy_dir '
                         '(<dir>/exported/policy.onnx + <dir>/params/deploy.yaml, or a '
                         'logs/rsl_rl/<experiment> folder -> latest run)'),
-        DeclareLaunchArgument('teleop', default_value='true',
-                              description='Start remote_teleop (Unitree remote -> cmd_vel)'),
+        DeclareLaunchArgument(
+            'input', default_value='unitree',
+            choices=['unitree', 'dualshock4', 'keyboard', 'none'],
+            description='Control device: unitree (wireless remote), dualshock4, keyboard, '
+                        'none (no teleop node)'),
+        DeclareLaunchArgument(
+            'input_device', default_value='',
+            description='dualshock4 / keyboard: /dev/input/eventN to use ("" = find it)'),
         DeclareLaunchArgument('log_level', default_value='info'),
     ]
 
+    return LaunchDescription(args + [
+        OpaqueFunction(function=_dds_environment),
+        OpaqueFunction(function=_nodes),
+    ])
+
+
+def _nodes(context):
     config = LaunchConfiguration('config')
     log_level = ['--ros-args', '--log-level', LaunchConfiguration('log_level')]
+    device = LaunchConfiguration('input').perform(context)
+    from_topic = device in ('dualshock4', 'keyboard')
 
     controller = Node(
         package='go2_policy_runner',
@@ -75,20 +96,37 @@ def generate_launch_description():
         name='policy_controller',
         output='screen',
         emulate_tty=True,
-        parameters=[config, {'default_policy_dir': LaunchConfiguration('policy_dir')}],
+        parameters=[config, {
+            'default_policy_dir': LaunchConfiguration('policy_dir'),
+            'remote_source': 'topic' if from_topic else 'lowstate',
+        }],
         arguments=log_level,
         # give the controller time to switch the motors to damping on Ctrl-C
         sigterm_timeout='5',
     )
+    nodes = [controller]
 
-    teleop = Node(
-        package='go2_policy_runner',
-        executable='remote_teleop',
-        name='remote_teleop',
-        output='screen',
-        parameters=[config],
-        arguments=log_level,
-        condition=IfCondition(LaunchConfiguration('teleop')),
-    )
-
-    return LaunchDescription(args + [OpaqueFunction(function=_dds_environment), controller, teleop])
+    if device == 'unitree':
+        nodes.append(Node(
+            package='go2_policy_runner',
+            executable='remote_teleop',
+            name='remote_teleop',
+            output='screen',
+            parameters=[config],
+            arguments=log_level,
+        ))
+    elif from_topic:
+        input_params = {'device': device}
+        input_device = LaunchConfiguration('input_device').perform(context).strip()
+        if input_device:
+            input_params['device_path'] = input_device
+        nodes.append(Node(
+            package='go2_policy_runner',
+            executable='input_teleop',
+            name='input_teleop',
+            output='screen',
+            emulate_tty=True,
+            parameters=[config, input_params],
+            arguments=log_level,
+        ))
+    return nodes

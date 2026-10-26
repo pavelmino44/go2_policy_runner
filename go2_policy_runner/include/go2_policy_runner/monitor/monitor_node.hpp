@@ -3,7 +3,7 @@
 //
 // robot_monitor: read-only view of the controller and the robot.
 //
-//   subscribes  ~/state, ~/policy_step of the controller, lowstate, lowcmd, cmd_vel
+//   subscribes  ~/state, ~/policy_step of the controller, lowstate, lowcmd, cmd_vel, remote
 //   reads       controller parameters (control_rate, joint_limits.*, fsm.<mode>.max_tilt)
 //   publishes   /diagnostics (diagnostic_msgs/DiagnosticArray), optional
 //   calls       <controller>/set_mode {mode: passive} on request (the only action it can take)
@@ -30,6 +30,7 @@
 #include "go2_policy_runner_interfaces/srv/set_mode.hpp"
 #include "unitree_go/msg/low_cmd.hpp"
 #include "unitree_go/msg/low_state.hpp"
+#include "unitree_go/msg/wireless_controller.hpp"
 
 namespace go2_policy_runner::ros
 {
@@ -73,6 +74,7 @@ private:
   rclcpp::Subscription<unitree_go::msg::LowState>::SharedPtr lowstate_sub_;
   rclcpp::Subscription<unitree_go::msg::LowCmd>::SharedPtr lowcmd_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Subscription<unitree_go::msg::WirelessController>::SharedPtr remote_sub_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
   rclcpp::Client<SetMode>::SharedPtr set_mode_client_;
   std::shared_ptr<rclcpp::AsyncParametersClient> param_client_;
@@ -81,7 +83,7 @@ private:
   // data (guarded by mutex_)
   std::mutex mutex_;
   monitor::Snapshot data_;
-  double t_state_{-1}, t_lowstate_{-1}, t_cmd_vel_{-1}, t_policy_{-1};
+  double t_state_{-1}, t_lowstate_{-1}, t_cmd_vel_{-1}, t_policy_{-1}, t_remote_{-1};
   std::map<std::string, double> max_tilt_by_mode_;
   std::vector<float> lower_, upper_;
   double t_params_{-1e9};
